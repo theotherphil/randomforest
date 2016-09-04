@@ -1,0 +1,6 @@
+[package]
+name = "randomforest"
+version = "0.1.0"
+authors = ["Phil Ellison <phil.j.ellison@gmail.com>"]
+
+[dependencies]
