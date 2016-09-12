@@ -90,21 +90,25 @@ pub struct Forest {
     num_classes: usize
 }
 
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub struct ForestParameters {
+    pub num_trees: usize,
+    pub depth: usize,
+    pub num_classes: usize, // TODO: really a property of dataset
+    pub num_candidates: usize
+}
+
 impl Forest {
-    pub fn train(num_trees: usize,
-                 depth: usize,
-                 num_classes: usize,
-                 num_candidates: usize,
-                 data: &Dataset) -> Forest {
+    pub fn train(params: ForestParameters, data: &Dataset) -> Forest {
         let mut trees = vec![];
-        for i in 0..num_trees {
+        for i in 0..params.num_trees {
             println!("training tree {:?}", i);
-            let tree = train_tree(depth, num_classes, num_candidates, data);
+            let tree = train_tree(params.depth, params.num_classes, params.num_candidates, data);
             trees.push(tree);
         }
         Forest {
             trees: trees,
-            num_classes: num_classes
+            num_classes: params.num_classes
         }
     }
 
