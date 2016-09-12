@@ -5,8 +5,8 @@ use rand::{Rng, thread_rng, ThreadRng};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dataset {
-    labels: Vec<usize>,
-    data: Vec<Vec<f64>>
+    pub labels: Vec<usize>,
+    pub data: Vec<Vec<f64>>
 }
 
 impl Dataset {
@@ -41,7 +41,7 @@ impl Default for Stump {
 
 #[derive(Debug, Clone)]
 pub struct Distribution {
-    probs: Vec<f64>
+    pub probs: Vec<f64>
 }
 
 impl Default for Distribution {
@@ -70,7 +70,7 @@ impl Tree {
             let decision = self.nodes[idx].classify(sample);
             idx = if decision { right_child_idx(idx) } else { left_child_idx(idx) };
             let num_nodes = self.num_nodes();
-            if idx > num_nodes {
+            if idx >= num_nodes {
                 return self.leaves[idx - num_nodes].clone();
             }
         }
@@ -109,15 +109,18 @@ impl Forest {
 
     pub fn classify(&self, sample: &Vec<f64>) -> Distribution {
         let mut probs = vec![0f64; self.num_classes];
+
         for tree in self.trees.iter() {
             let dist = tree.classify(sample);
             for i in 0..self.num_classes {
                 probs[i] += dist.probs[i];
             }
         }
+
         for i in 0..self.num_classes {
             probs[i] /= self.trees.len() as f64;
         }
+
         Distribution {
             probs: probs
         }
@@ -137,7 +140,7 @@ pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data:
 
     let mut nodes = vec![Stump::default(); num_nodes];
     let mut nodes_data = vec![Dataset::empty(); num_nodes];
-    let mut leaves = vec![Distribution::default(); num_leaves];
+    let mut leaves = vec![Distribution { probs: vec![0f64; num_classes] }; num_leaves];
 
     nodes_data[0] = data.clone();
 
@@ -177,7 +180,7 @@ pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data:
         else {
             nodes[i] = best_candidate;
             nodes_data[left] = best_split.0;
-            nodes_data[right_child_idx(i)] = best_split.1;
+            nodes_data[right] = best_split.1;
         }
     }
 
@@ -190,10 +193,14 @@ pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data:
 
 fn read_class_probabilities(num_classes: usize, labels: &Vec<usize>) -> Distribution {
     let mut probs = vec![0f64; num_classes];
+    let count = labels.len() as f64;
+    // There's no early stopping rule, so there might not be any entries
+    if count == 0f64 {
+        return Distribution { probs: probs };
+    }
     for l in labels {
         probs[*l] += 1.0
     }
-    let count = labels.len() as f64;
     for n in 0..num_classes {
         probs[n] /= count;
     }
