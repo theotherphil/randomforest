@@ -85,7 +85,46 @@ pub fn right_child_idx(idx: usize) -> usize {
     2 * idx + 2
 }
 
-pub fn train_tree(depth: u32, num_classes: usize, num_candidates: usize, data: &Dataset) -> Tree {
+pub struct Forest {
+    trees: Vec<Tree>,
+    num_classes: usize
+}
+
+impl Forest {
+    pub fn train(num_trees: usize,
+                 depth: usize,
+                 num_classes: usize,
+                 num_candidates: usize,
+                 data: &Dataset) -> Forest {
+        let mut trees = vec![];
+        for i in 0..num_trees {
+            let tree = train_tree(depth, num_classes, num_candidates, data);
+            trees.push(tree);
+        }
+        Forest {
+            trees: trees,
+            num_classes: num_classes
+        }
+    }
+
+    pub fn classify(&self, sample: &Vec<f64>) -> Distribution {
+        let mut probs = vec![0f64; self.num_classes];
+        for tree in self.trees.iter() {
+            let dist = tree.classify(sample);
+            for i in 0..self.num_classes {
+                probs[i] += dist.probs[i];
+            }
+        }
+        for i in 0..self.num_classes {
+            probs[i] /= self.trees.len() as f64;
+        }
+        Distribution {
+            probs: probs
+        }
+    }
+}
+
+pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data: &Dataset) -> Tree {
     let mut generator = StumpGenerator {
         rng: thread_rng(),
         num_dims: data.data[0].len(),
@@ -93,7 +132,7 @@ pub fn train_tree(depth: u32, num_classes: usize, num_candidates: usize, data: &
         max_thresh: 1f64
     };
 
-    let num_nodes = 2usize.pow(depth) - 1;
+    let num_nodes = 2usize.pow(depth as u32) - 1;
     let num_leaves = num_nodes + 1;
 
     let mut nodes = vec![Stump::default(); num_nodes];
