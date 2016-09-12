@@ -1,7 +1,7 @@
 
 extern crate rand;
 use std::f64;
-use rand::{Rng, thread_rng, ThreadRng};
+use rand::{Rng, ThreadRng};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dataset {
@@ -19,12 +19,16 @@ impl Dataset {
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-struct Stump {
+pub struct Stump {
     dimension: usize,
     threshold: f64
 }
 
-impl Stump {
+pub trait Classifier {
+    fn classify(&self, sample: &Vec<f64>) -> bool;
+}
+
+impl Classifier for Stump {
     fn classify(&self, sample: &Vec<f64>) -> bool {
         sample[self.dimension] > self.threshold
     }
@@ -52,13 +56,13 @@ impl Default for Distribution {
     }
 }
 
-pub struct Tree {
+pub struct Tree<C> {
     depth: usize,
-    nodes: Vec<Stump>,
+    nodes: Vec<C>,
     leaves: Vec<Distribution>
 }
 
-impl Tree {
+impl<C: Classifier> Tree<C> {
     fn num_nodes(&self) -> usize {
         2usize.pow(self.depth as u32) - 1
     }
@@ -85,8 +89,8 @@ pub fn right_child_idx(idx: usize) -> usize {
     2 * idx + 2
 }
 
-pub struct Forest {
-    trees: Vec<Tree>,
+pub struct Forest<C> {
+    trees: Vec<Tree<C>>,
     num_classes: usize
 }
 
@@ -98,14 +102,17 @@ pub struct ForestParameters {
     pub num_candidates: usize
 }
 
-impl Forest {
-    pub fn train(params: ForestParameters, data: &Dataset) -> Forest {
-        let mut trees = vec![];
-        for i in 0..params.num_trees {
-            println!("training tree {:?}", i);
-            let tree = train_tree(params.depth, params.num_classes, params.num_candidates, data);
-            trees.push(tree);
-        }
+impl<C: Classifier + Default + Clone> Forest<C> {
+    pub fn train<G>(params: ForestParameters, generator: &mut G, data: &Dataset) -> Forest<C>
+        where G: Generator<Classifier=C>
+    {
+        let trees = (0..params.num_trees)
+            .map(|t| {
+                println!("training tree {:?}", t);
+                train_tree(params.depth, params.num_classes, params.num_candidates, generator, data)
+            })
+            .collect();
+
         Forest {
             trees: trees,
             num_classes: params.num_classes
@@ -132,18 +139,47 @@ impl Forest {
     }
 }
 
-pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data: &Dataset) -> Tree {
-    let mut generator = StumpGenerator {
-        rng: thread_rng(),
-        num_dims: data.data[0].len(),
-        min_thresh: 0f64,
-        max_thresh: 1f64
-    };
+pub trait Generator {
+    type Classifier;
+    fn generate(&mut self, count: usize) -> Vec<Self::Classifier>;
+}
 
+pub struct StumpGenerator {
+    pub rng: ThreadRng,
+    pub num_dims: usize,
+    pub min_thresh: f64,
+    pub max_thresh: f64
+}
+
+impl Generator for StumpGenerator {
+    type Classifier = Stump;
+
+    fn generate(&mut self, count: usize) -> Vec<Stump> {
+        let mut stumps = vec![Stump::default(); count];
+        for i in 0..count {
+            let dim = self.rng.gen_range(0, self.num_dims);
+            let thresh = self.rng.gen_range(self.min_thresh, self.max_thresh);
+            stumps[i] = Stump {
+                dimension: dim,
+                threshold: thresh
+            }
+        }
+        stumps
+    }
+}
+
+fn train_tree<C, G>(depth: usize,
+                    num_classes: usize,
+                    num_candidates: usize,
+                    generator: &mut G,
+                    data: &Dataset) -> Tree<C>
+    where C: Classifier + Default + Clone,
+          G: Generator<Classifier=C>
+ {
     let num_nodes = 2usize.pow(depth as u32) - 1;
     let num_leaves = num_nodes + 1;
 
-    let mut nodes = vec![Stump::default(); num_nodes];
+    let mut nodes = vec![C::default(); num_nodes];
     let mut nodes_data = vec![Dataset::empty(); num_nodes];
     let mut leaves = vec![Distribution { probs: vec![0f64; num_classes] }; num_leaves];
 
@@ -154,7 +190,7 @@ pub fn train_tree(depth: usize, num_classes: usize, num_candidates: usize, data:
         let candidates = generator.generate(num_candidates);
 
         let mut best_gain = f64::NEG_INFINITY;
-        let mut best_candidate = candidates[0];
+        let mut best_candidate = candidates[0].clone();
         let mut best_split = (Dataset::empty(), Dataset::empty());
 
         for c in candidates {
@@ -214,45 +250,15 @@ fn read_class_probabilities(num_classes: usize, labels: &Vec<usize>) -> Distribu
     }
 }
 
-struct StumpGenerator {
-    rng: ThreadRng,
-    num_dims: usize,
-    min_thresh: f64,
-    max_thresh: f64
-}
-
-impl StumpGenerator {
-    fn generate(&mut self, count: usize) -> Vec<Stump> {
-        let mut stumps = vec![Stump::default(); count];
-        for i in 0..count {
-            let dim = self.rng.gen_range(0, self.num_dims);
-            let thresh = self.rng.gen_range(self.min_thresh, self.max_thresh);
-            stumps[i] = Stump {
-                dimension: dim,
-                threshold: thresh
-            }
-        }
-        stumps
-    }
-}
-
-fn split(stump: &Stump, data: &Dataset) -> (Dataset, Dataset) {
+fn split<C: Classifier>(classifier: &C, data: &Dataset) -> (Dataset, Dataset) {
     let mut left = Dataset::empty();
     let mut right = Dataset::empty();
 
     for i in 0..data.labels.len() {
-        let l = data.labels[i];
         let ref d = data.data[i];
-
-        let c = stump.classify(&d);
-        if c {
-            right.labels.push(l);
-            right.data.push(d.clone());
-        }
-        else {
-            left.labels.push(l);
-            left.data.push(d.clone());
-        }
+        let dataset = if classifier.classify(&d) { &mut right } else { &mut left };
+        dataset.labels.push(data.labels[i]);
+        dataset.data.push(d.clone());
     }
 
     (left, right)
