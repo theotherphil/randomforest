@@ -98,6 +98,7 @@ impl Forest {
                  data: &Dataset) -> Forest {
         let mut trees = vec![];
         for i in 0..num_trees {
+            println!("training tree {:?}", i);
             let tree = train_tree(depth, num_classes, num_candidates, data);
             trees.push(tree);
         }
