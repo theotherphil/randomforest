@@ -1,4 +1,9 @@
 
+
+#![cfg_attr(test, feature(test))]
+
+#[cfg(test)]
+extern crate test;
 extern crate rand;
 
 pub mod stump;
@@ -256,18 +261,59 @@ fn entropy<'a, I>(labels: I, num_classes: usize) -> f64
 
 #[cfg(test)]
 mod tests {
-    use super::entropy;
+    use super::{Dataset, entropy, train_tree};
+    use super::stump::{Stump, StumpGenerator};
+    use test;
+    use rand::{Rng, thread_rng};
 
     #[test]
     fn test_entropy_usize() {
-        assert_eq!(entropy(vec![1usize, 1].into_iter(), 2), 0f64);
-        assert_eq!(entropy(vec![0usize].into_iter(), 1), 0f64);
-        assert_eq!(entropy(vec![0usize, 1].into_iter(), 2), 1f64);
-        assert_eq!(entropy(vec![0usize, 1, 2, 3].into_iter(), 4), 2f64);
+        assert_eq!(entropy(vec![1usize, 1].iter(), 2), 0f64);
+        assert_eq!(entropy(vec![0usize].iter(), 1), 0f64);
+        assert_eq!(entropy(vec![0usize, 1].iter(), 2), 1f64);
+        assert_eq!(entropy(vec![0usize, 1, 2, 3].iter(), 4), 2f64);
     }
 
     #[test]
     fn test_weighted_entropy_drop() {
         // do something...
     }
+
+    #[bench]
+    fn bench_train_stumps(b: &mut test::Bencher) {
+        let num_samples = 100;
+        let num_classes = 10;
+        let num_dimensions = 5;
+        let num_candidates = 10;
+        let depth = 6;
+
+        let mut rng = thread_rng();
+        let mut labels = vec![];
+        let mut data = vec![];
+
+        for i in 0..num_samples {
+            let l = rng.gen_range(0, num_classes);
+            labels.push(l);
+            let d = (0..num_dimensions)
+                .map(|n| rng.gen_range(0f64, 1f64))
+                .collect();
+            data.push(d);
+        }
+
+        let dataset = Dataset {
+            labels: labels,
+            data: data
+        };
+
+        let mut generator = StumpGenerator {
+            rng: rng,
+            num_dims: num_dimensions,
+            min_thresh: 0f64,
+            max_thresh: 1f64
+        };
+
+        b.iter(|| {
+            train_tree(depth, num_classes, num_candidates, &mut generator, &dataset)
+        });
+   }
 }
