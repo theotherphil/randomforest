@@ -231,8 +231,9 @@ fn weighted_entropy_drop(num_classes: usize,
                          parent: &[usize],
                          left: &[usize],
                          right: &[usize]) -> f64 {
-    let weighted_left = entropy(left.iter(), num_classes) * left.len() as f64;
-    let weighted_right = entropy(right.iter(), num_classes) * right.len() as f64;
+    let count = parent.len() as f64;
+    let weighted_left = entropy(left.iter(), num_classes) * left.len() as f64 / count;
+    let weighted_right = entropy(right.iter(), num_classes) * right.len() as f64 / count;
     entropy(parent.iter(), num_classes) - weighted_left - weighted_right
 }
 
