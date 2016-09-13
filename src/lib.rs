@@ -17,77 +17,11 @@ pub struct Dataset {
     pub data: Vec<Vec<f64>>
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct View<'a> {
-    pub indices: Vec<usize>,
-    pub backing_labels: &'a [usize],
-    pub backing_data: &'a [Vec<f64>]
-}
-
-impl<'a> View<'a> {
-    fn label_iter(&'a self) -> ViewLabelIterator<'a> {
-        ViewLabelIterator::<'a> {
-            view: &self,
-            pos: 0
-        }
-    }
-
-    fn empty(data: &'a Dataset) -> View<'a> {
-        View::<'a> {
-            indices: vec![],
-            backing_labels: &data.labels,
-            backing_data: &data.data
-        }
-    }
-
-    fn create(data: &'a Dataset, indices: Vec<usize>) -> View<'a> {
-        View::<'a> {
-            indices: indices,
-            backing_labels: &data.labels,
-            backing_data: &data.data
-        }
-    }
-
-    fn create_from_view(data: &'a View, indices: Vec<usize>) -> View<'a> {
-        View::<'a> {
-            indices: indices,
-            backing_labels: data.backing_labels,
-            backing_data: data.backing_data
-        }
-    }
-}
-
-pub struct ViewLabelIterator<'a> {
-    view: &'a View<'a>,
-    pos: usize
-}
-
-impl<'a> Iterator for ViewLabelIterator<'a> {
-    type Item = &'a usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.view.indices.len() {
-            return None;
-        }
-        let ref ret = self.view.backing_labels[self.view.indices[self.pos]];
-        self.pos += 1;
-        Some(ret)
-    }
-}
-
-impl<'a> ExactSizeIterator for ViewLabelIterator<'a> {
-    fn len(&self) -> usize {
-        self.view.indices.len()
-    }
-}
-
-
 pub struct LabelIter<'a> {
     labels: &'a [usize],
     selection: &'a Selection,
     pos: usize
 }
-
 
 impl<'a> Iterator for LabelIter<'a> {
     type Item = &'a usize;
@@ -105,15 +39,6 @@ impl<'a> Iterator for LabelIter<'a> {
 impl<'a> ExactSizeIterator for LabelIter<'a> {
     fn len(&self) -> usize {
         self.selection.0.len()
-    }
-}
-
-impl Dataset {
-    fn empty() -> Dataset {
-        Dataset {
-            labels: Vec::new(),
-            data: Vec::new()
-        }
     }
 }
 
@@ -238,11 +163,9 @@ fn train_tree<C, G>(depth: usize,
     let num_leaves = num_nodes + 1;
 
     let mut nodes = vec![C::default(); num_nodes];
-    //let mut nodes_data = vec![View::empty(data); num_nodes];
     let mut nodes_data = vec![Selection(vec![]); num_nodes];
     let mut leaves = vec![Distribution { probs: vec![0f64; num_classes] }; num_leaves];
 
-    //nodes_data[0] = View::create(data, (0..data.labels.len()).collect());\
     nodes_data[0] = Selection((0..data.labels.len()).collect());
 
     // Invariant: nodes_data[i] has already been populated, but nodes[i] has not.
@@ -290,8 +213,6 @@ fn train_tree<C, G>(depth: usize,
                     pos: 0
                 });
         }
-        // TODO: we don't need views in all these places - just pass the indices and backing data
-        // TODO: around separately.
         else {
             nodes[i] = best_candidate;
             nodes_data[left] = best_split.0;
@@ -392,7 +313,7 @@ fn entropy<'a, I>(labels: I, num_classes: usize) -> f64
 #[cfg(test)]
 mod tests {
     use super::{Dataset, entropy, train_tree};
-    use super::stump::{Stump, StumpGenerator};
+    use super::stump::StumpGenerator;
     use test;
     use rand::{Rng, thread_rng};
 
@@ -421,11 +342,11 @@ mod tests {
         let mut labels = vec![];
         let mut data = vec![];
 
-        for i in 0..num_samples {
+        for _ in 0..num_samples {
             let l = rng.gen_range(0, num_classes);
             labels.push(l);
             let d = (0..num_dimensions)
-                .map(|n| rng.gen_range(0f64, 1f64))
+                .map(|_| rng.gen_range(0f64, 1f64))
                 .collect();
             data.push(d);
         }
