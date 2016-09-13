@@ -23,6 +23,16 @@ pub struct LabelIter<'a> {
     pos: usize
 }
 
+impl<'a> LabelIter<'a> {
+    fn new(backing_labels: &'a [usize], selection: &'a Selection) -> LabelIter<'a> {
+        LabelIter {
+            labels: backing_labels,
+            selection: selection,
+            pos: 0
+        }
+    }
+}
+
 impl<'a> Iterator for LabelIter<'a> {
     type Item = &'a usize;
 
@@ -199,19 +209,10 @@ fn train_tree<C, G>(depth: usize,
             let left_leaf_idx = left - num_nodes;
             let right_leaf_idx = right - num_nodes;
 
-            leaves[left_leaf_idx] = read_class_probabilities(num_classes,
-                LabelIter {
-                    labels: &data.labels,
-                    selection: &best_split.0,
-                    pos: 0
-                });
-
-            leaves[right_leaf_idx] = read_class_probabilities(num_classes,
-                LabelIter {
-                    labels: &data.labels,
-                    selection: &best_split.1,
-                    pos: 0
-                });
+            leaves[left_leaf_idx]
+                = read_class_probabilities(num_classes, LabelIter::new(&data.labels, &best_split.0));
+            leaves[right_leaf_idx]
+                = read_class_probabilities(num_classes, LabelIter::new(&data.labels, &best_split.1));
         }
         else {
             nodes[i] = best_candidate;
@@ -267,24 +268,12 @@ fn weighted_entropy_drop(num_classes: usize,
                          parent: &Selection,
                          left: &Selection,
                          right: &Selection) -> f64 {
-    let count = parent.0.len() as f64;
-    let weighted_left = entropy(LabelIter {
-        labels: &data.labels,
-        selection: left,
-        pos: 0
-    }, num_classes) * left.0.len() as f64 / count;
+    let left_weight = left.0.len() as f64 / parent.0.len() as f64;
+    let right_weight = right.0.len() as f64 / parent.0.len() as f64;
 
-    let weighted_right = entropy(LabelIter {
-        labels: &data.labels,
-        selection: right,
-        pos: 0
-    }, num_classes) * right.0.len() as f64 / count;
-
-    entropy(LabelIter {
-        labels: &data.labels,
-        selection: parent,
-        pos: 0
-    }, num_classes) - weighted_left - weighted_right
+    let weighted_left = entropy(LabelIter::new(&data.labels, left), num_classes) * left_weight;
+    let weighted_right = entropy(LabelIter::new(&data.labels, right), num_classes) * right_weight;
+    entropy(LabelIter::new(&data.labels, parent), num_classes) - weighted_left - weighted_right
 }
 
 // Could allow non-usize labels. but then we'd need a map from label to index
