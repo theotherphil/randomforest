@@ -17,6 +17,97 @@ pub struct Dataset {
     pub data: Vec<Vec<f64>>
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct View<'a> {
+    pub indices: Vec<usize>,
+    pub backing_labels: &'a [usize],
+    pub backing_data: &'a [Vec<f64>]
+}
+
+impl<'a> View<'a> {
+    fn label_iter(&'a self) -> ViewLabelIterator<'a> {
+        ViewLabelIterator::<'a> {
+            view: &self,
+            pos: 0
+        }
+    }
+
+    fn empty(data: &'a Dataset) -> View<'a> {
+        View::<'a> {
+            indices: vec![],
+            backing_labels: &data.labels,
+            backing_data: &data.data
+        }
+    }
+
+    fn create(data: &'a Dataset, indices: Vec<usize>) -> View<'a> {
+        View::<'a> {
+            indices: indices,
+            backing_labels: &data.labels,
+            backing_data: &data.data
+        }
+    }
+
+    fn create_from_view(data: &'a View, indices: Vec<usize>) -> View<'a> {
+        View::<'a> {
+            indices: indices,
+            backing_labels: data.backing_labels,
+            backing_data: data.backing_data
+        }
+    }
+}
+
+pub struct ViewLabelIterator<'a> {
+    view: &'a View<'a>,
+    pos: usize
+}
+
+impl<'a> Iterator for ViewLabelIterator<'a> {
+    type Item = &'a usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.view.indices.len() {
+            return None;
+        }
+        let ref ret = self.view.backing_labels[self.view.indices[self.pos]];
+        self.pos += 1;
+        Some(ret)
+    }
+}
+
+impl<'a> ExactSizeIterator for ViewLabelIterator<'a> {
+    fn len(&self) -> usize {
+        self.view.indices.len()
+    }
+}
+
+
+pub struct LabelIter<'a> {
+    labels: &'a [usize],
+    selection: &'a Selection,
+    pos: usize
+}
+
+
+impl<'a> Iterator for LabelIter<'a> {
+    type Item = &'a usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.selection.0.len() {
+            return None;
+        }
+        let ref ret = self.labels[self.selection.0[self.pos]];
+        self.pos += 1;
+        Some(ret)
+    }
+}
+
+impl<'a> ExactSizeIterator for LabelIter<'a> {
+    fn len(&self) -> usize {
+        self.selection.0.len()
+    }
+}
+
 impl Dataset {
     fn empty() -> Dataset {
         Dataset {
@@ -131,6 +222,10 @@ impl<C: Classifier + Default + Clone> Forest<C> {
     }
 }
 
+/// A set of indices into another array
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Selection(Vec<usize>);
+
 fn train_tree<C, G>(depth: usize,
                     num_classes: usize,
                     num_candidates: usize,
@@ -143,10 +238,12 @@ fn train_tree<C, G>(depth: usize,
     let num_leaves = num_nodes + 1;
 
     let mut nodes = vec![C::default(); num_nodes];
-    let mut nodes_data = vec![Dataset::empty(); num_nodes];
+    //let mut nodes_data = vec![View::empty(data); num_nodes];
+    let mut nodes_data = vec![Selection(vec![]); num_nodes];
     let mut leaves = vec![Distribution { probs: vec![0f64; num_classes] }; num_leaves];
 
-    nodes_data[0] = data.clone();
+    //nodes_data[0] = View::create(data, (0..data.labels.len()).collect());\
+    nodes_data[0] = Selection((0..data.labels.len()).collect());
 
     // Invariant: nodes_data[i] has already been populated, but nodes[i] has not.
     for i in 0..num_nodes {
@@ -154,15 +251,16 @@ fn train_tree<C, G>(depth: usize,
 
         let mut best_gain = f64::NEG_INFINITY;
         let mut best_candidate = candidates[0].clone();
-        let mut best_split = (Dataset::empty(), Dataset::empty());
+        let mut best_split = (Selection(vec![]), Selection(vec![]));
 
         for c in candidates {
-            let (left, right) = split(&c, &nodes_data[i]);
+            let (left, right) = split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
 
             let gain = weighted_entropy_drop(num_classes,
-                                             &nodes_data[i].labels,
-                                             &left.labels,
-                                             &right.labels);
+                                             data,
+                                             &nodes_data[i],
+                                             &left,
+                                             &right);
 
             if gain > best_gain {
                 best_gain = gain;
@@ -178,9 +276,22 @@ fn train_tree<C, G>(depth: usize,
             let left_leaf_idx = left - num_nodes;
             let right_leaf_idx = right - num_nodes;
 
-            leaves[left_leaf_idx] = read_class_probabilities(num_classes, &best_split.0.labels);
-            leaves[right_leaf_idx] = read_class_probabilities(num_classes, &best_split.1.labels);
+            leaves[left_leaf_idx] = read_class_probabilities(num_classes,
+                LabelIter {
+                    labels: &data.labels,
+                    selection: &best_split.0,
+                    pos: 0
+                });
+
+            leaves[right_leaf_idx] = read_class_probabilities(num_classes,
+                LabelIter {
+                    labels: &data.labels,
+                    selection: &best_split.1,
+                    pos: 0
+                });
         }
+        // TODO: we don't need views in all these places - just pass the indices and backing data
+        // TODO: around separately.
         else {
             nodes[i] = best_candidate;
             nodes_data[left] = best_split.0;
@@ -195,7 +306,9 @@ fn train_tree<C, G>(depth: usize,
     }
 }
 
-fn read_class_probabilities(num_classes: usize, labels: &Vec<usize>) -> Distribution {
+fn read_class_probabilities<'a, I>(num_classes: usize, labels: I) -> Distribution
+    where I: ExactSizeIterator<Item=&'a usize>
+{
     let mut probs = vec![0f64; num_classes];
     let count = labels.len() as f64;
     // There's no early stopping rule, so there might not be any entries
@@ -213,28 +326,44 @@ fn read_class_probabilities(num_classes: usize, labels: &Vec<usize>) -> Distribu
     }
 }
 
-fn split<C: Classifier>(classifier: &C, data: &Dataset) -> (Dataset, Dataset) {
-    let mut left = Dataset::empty();
-    let mut right = Dataset::empty();
+fn split<C: Classifier>(classifier: &C,
+                        data: &Dataset,
+                        selection: &Selection) -> (Selection, Selection) {
+    let mut left_indices = Vec::new();
+    let mut right_indices = Vec::new();
 
-    for i in 0..data.labels.len() {
+    for &i in &selection.0 {
         let ref d = data.data[i];
-        let dataset = if classifier.classify(&d) { &mut right } else { &mut left };
-        dataset.labels.push(data.labels[i]);
-        dataset.data.push(d.clone());
+        let set = if classifier.classify(&d) { &mut right_indices } else { &mut left_indices };
+        set.push(i);
     }
 
-    (left, right)
+    (Selection(left_indices), Selection(right_indices))
 }
 
 fn weighted_entropy_drop(num_classes: usize,
-                         parent: &[usize],
-                         left: &[usize],
-                         right: &[usize]) -> f64 {
-    let count = parent.len() as f64;
-    let weighted_left = entropy(left.iter(), num_classes) * left.len() as f64 / count;
-    let weighted_right = entropy(right.iter(), num_classes) * right.len() as f64 / count;
-    entropy(parent.iter(), num_classes) - weighted_left - weighted_right
+                         data: &Dataset,
+                         parent: &Selection,
+                         left: &Selection,
+                         right: &Selection) -> f64 {
+    let count = parent.0.len() as f64;
+    let weighted_left = entropy(LabelIter {
+        labels: &data.labels,
+        selection: left,
+        pos: 0
+    }, num_classes) * left.0.len() as f64 / count;
+
+    let weighted_right = entropy(LabelIter {
+        labels: &data.labels,
+        selection: right,
+        pos: 0
+    }, num_classes) * right.0.len() as f64 / count;
+
+    entropy(LabelIter {
+        labels: &data.labels,
+        selection: parent,
+        pos: 0
+    }, num_classes) - weighted_left - weighted_right
 }
 
 // Could allow non-usize labels. but then we'd need a map from label to index
