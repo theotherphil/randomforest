@@ -301,23 +301,39 @@ fn entropy<'a, I>(labels: I, num_classes: usize) -> f64
 
 #[cfg(test)]
 mod tests {
-    use super::{Dataset, entropy, train_tree};
+    use super::{Dataset, entropy, Selection, train_tree, weighted_entropy_drop};
     use super::stump::StumpGenerator;
     use test;
     use rand::{Rng, thread_rng};
 
     #[test]
     fn test_entropy_usize() {
-        assert_eq!(entropy(vec![1usize, 1].iter(), 2), 0f64);
-        assert_eq!(entropy(vec![0usize].iter(), 1), 0f64);
-        assert_eq!(entropy(vec![0usize, 1].iter(), 2), 1f64);
-        assert_eq!(entropy(vec![0usize, 1, 2, 3].iter(), 4), 2f64);
+        assert_eq!(entropy(vec![1usize, 1            ].iter(), 2), 0f64);
+        assert_eq!(entropy(vec![0usize               ].iter(), 1), 0f64);
+        assert_eq!(entropy(vec![0usize, 1            ].iter(), 2), 1f64);
+        assert_eq!(entropy(vec![0usize, 1, 2, 3      ].iter(), 4), 2f64);
     }
 
     #[test]
     fn test_weighted_entropy_drop() {
-        // do something...
+        assert_eq!(entropy(vec![0usize, 0, 1, 1, 2, 2].iter(), 3), 3f64.log2());
+        assert_eq!(entropy(vec![0usize, 0, 1, 1      ].iter(), 3), 1f64);
+        assert_eq!(entropy(vec![2usize, 2            ].iter(), 3), 0f64);
+
+        let data = Dataset {
+            labels: vec![0, 0, 1, 1, 2, 2],
+            data: vec![]
+        };
+
+        let parent = Selection(vec![0, 1, 2, 3, 4, 5]);
+        let left = Selection(vec![0, 1, 2, 3]);
+        let right = Selection(vec![4, 5]);
+
+        let drop = weighted_entropy_drop(3, &data, &parent, &left, &right);
+        assert_eq!(drop, 3f64.log2() - 2f64/3f64);
     }
+
+    // TODO: add tests for e.g. read_class_probabilities where the set is empty
 
     #[bench]
     fn bench_train_stumps(b: &mut test::Bencher) {
