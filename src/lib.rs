@@ -1,4 +1,30 @@
 
+// TODO:
+// * lots more testing
+// * more benchmarks, showing scaling with various dimensions
+// * support other leaf types
+// * support incomplete trees
+// * more stopping rules, e.g. min split size, min information gain
+// * support other information gains (e.g. for Hough forests)
+// * make use of Selection less error prone
+//      probably _do_ want the dataset view struct, just don't
+//      use it to store stuff in train_tree. Then make Selection private again
+// * serialisation
+// * bagging
+// * tests on realistically sized datasets
+// * parallelise training by tree
+// * progress logging and performance stats
+// * debugging tools
+// * traits to use via Box which hide the types, e.g. Forest trait
+//   which doesn't expose the classifier or stopping rule types
+// * conic classifiers
+// * implement Hough forest object detection paper as demo
+// * draw original data points on demo coloured images, with black outline
+// * visualisation for leaves - e.g. visualise histograms for Distribution leaves,
+//   or distribution of offset from centre for Hough leaves
+// * clone of Selection in train_tree can probably be replaced using split_at_mut
+// * profiling
+// * GPUs?
 
 #![cfg_attr(test, feature(test))]
 
@@ -16,6 +42,10 @@ pub struct Dataset {
     pub labels: Vec<usize>,
     pub data: Vec<Vec<f64>>
 }
+
+/// A set of indices into another array
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selection(Vec<usize>);
 
 pub struct LabelIter<'a> {
     labels: &'a [usize],
@@ -156,10 +186,6 @@ impl<C: Classifier + Default + Clone> Forest<C> {
         }
     }
 }
-
-/// A set of indices into another array
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Selection(Vec<usize>);
 
 fn train_tree<C, G>(depth: usize,
                     num_classes: usize,
