@@ -37,7 +37,7 @@ pub mod stump;
 pub mod hyperplane;
 
 use std::f64;
-use dataset::{Dataset, Selection, LabelIter};
+use dataset::{Dataset, Selection, SelectionIter};
 
 pub trait Classifier {
     fn classify(&self, sample: &Vec<f64>) -> bool;
