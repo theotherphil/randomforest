@@ -121,7 +121,6 @@ pub struct Forest<C> {
 pub struct ForestParameters {
     pub num_trees: usize,
     pub depth: usize,
-    pub num_classes: usize, // TODO: really a property of dataset
     pub num_candidates: usize
 }
 
@@ -132,13 +131,13 @@ impl<C: Classifier + Default + Clone> Forest<C> {
         let trees = (0..params.num_trees)
             .map(|t| {
                 println!("training tree {:?}", t);
-                train_tree(params.depth, params.num_classes, params.num_candidates, generator, data)
+                train_tree(params.depth, params.num_candidates, generator, data)
             })
             .collect();
 
         Forest {
             trees: trees,
-            num_classes: params.num_classes
+            num_classes: data.num_classes
         }
     }
 
@@ -163,7 +162,6 @@ impl<C: Classifier + Default + Clone> Forest<C> {
 }
 
 fn train_tree<C, G>(depth: usize,
-                    num_classes: usize,
                     num_candidates: usize,
                     generator: &mut G,
                     data: &Dataset) -> Tree<C>
@@ -175,7 +173,7 @@ fn train_tree<C, G>(depth: usize,
 
     let mut nodes = vec![C::default(); num_nodes];
     let mut nodes_data = vec![Selection(vec![]); num_nodes];
-    let mut leaves = vec![Distribution { probs: vec![0f64; num_classes] }; num_leaves];
+    let mut leaves = vec![Distribution { probs: vec![0f64; data.num_classes] }; num_leaves];
 
     nodes_data[0] = Selection((0..data.labels.len()).collect());
 
@@ -190,7 +188,7 @@ fn train_tree<C, G>(depth: usize,
         for c in candidates {
             let (left, right) = split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
 
-            let gain = weighted_entropy_drop(num_classes,
+            let gain = weighted_entropy_drop(data.num_classes,
                                              data,
                                              &nodes_data[i],
                                              &left,
@@ -209,11 +207,11 @@ fn train_tree<C, G>(depth: usize,
         if left >= num_nodes {
             let left_leaf_idx = left - num_nodes;
             let left_labels = data.select_labels(&best_split.0);
-            leaves[left_leaf_idx] = Distribution::from_labels(left_labels, num_classes);
+            leaves[left_leaf_idx] = Distribution::from_labels(left_labels, data.num_classes);
 
             let right_leaf_idx = right - num_nodes;
             let right_labels = data.select_labels(&best_split.1);
-            leaves[right_leaf_idx] = Distribution::from_labels(right_labels, num_classes);
+            leaves[right_leaf_idx] = Distribution::from_labels(right_labels, data.num_classes);
         }
         else {
             nodes[i] = best_candidate;
@@ -303,6 +301,7 @@ mod tests {
         assert_eq!(entropy(vec![2usize, 2            ].iter(), 3), 0f64);
 
         let data = Dataset {
+            num_classes: 3,
             labels: vec![0, 0, 1, 1, 2, 2],
             data: vec![]
         };
@@ -315,7 +314,7 @@ mod tests {
         assert_eq!(drop, 3f64.log2() - 2f64/3f64);
     }
 
-    // TODO: add tests for e.g. read_class_probabilities where the set is empty
+    // TODO: add tests for e.g. constructing distributions or splitting where the set is empty
 
     #[bench]
     fn bench_train_stumps(b: &mut test::Bencher) {
@@ -339,6 +338,7 @@ mod tests {
         }
 
         let dataset = Dataset {
+            num_classes: num_classes,
             labels: labels,
             data: data
         };
@@ -351,7 +351,7 @@ mod tests {
         };
 
         b.iter(|| {
-            train_tree(depth, num_classes, num_candidates, &mut generator, &dataset)
+            train_tree(depth, num_candidates, &mut generator, &dataset)
         });
    }
 }

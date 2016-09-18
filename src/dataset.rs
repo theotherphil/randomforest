@@ -3,8 +3,9 @@ use std::slice::Iter;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dataset {
+    pub num_classes: usize,
     pub labels: Vec<usize>,
-    pub data: Vec<Vec<f64>>
+    pub data: Vec<Vec<f64>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -45,6 +46,10 @@ impl<'a> DatasetView<'a> {
 
     pub fn iter_data(&self) -> SelectionIter<Vec<f64>> {
         SelectionIter::new(&self.backing.data, self.selection)
+    }
+
+    pub fn num_classes(&self) -> usize {
+        self.backing.num_classes
     }
 }
 
