@@ -6,9 +6,6 @@
 // * support incomplete trees
 // * more stopping rules, e.g. min split size, min information gain
 // * support other information gains (e.g. for Hough forests)
-// * make use of Selection less error prone
-//      probably _do_ want the dataset view struct, just don't
-//      use it to store stuff in train_tree. Then make Selection private again
 // * serialisation
 // * bagging
 // * tests on realistically sized datasets
@@ -51,6 +48,27 @@ pub trait Generator {
 #[derive(Debug, Clone)]
 pub struct Distribution {
     pub probs: Vec<f64>
+}
+
+impl Distribution {
+    pub fn from_labels<'a, I>(labels: I, num_classes: usize) -> Distribution
+        where I: ExactSizeIterator<Item=&'a usize>
+    {
+        let mut probs = vec![0f64; num_classes];
+        let count = labels.len() as f64;
+        if count == 0f64 {
+            return Distribution { probs: probs };
+        }
+        for l in labels {
+            probs[*l] += 1.0
+        }
+        for n in 0..num_classes {
+            probs[n] /= count;
+        }
+        Distribution {
+            probs: probs
+        }
+    }
 }
 
 impl Default for Distribution {
@@ -190,12 +208,12 @@ fn train_tree<C, G>(depth: usize,
 
         if left >= num_nodes {
             let left_leaf_idx = left - num_nodes;
-            let right_leaf_idx = right - num_nodes;
+            let left_labels = data.select_labels(&best_split.0);
+            leaves[left_leaf_idx] = Distribution::from_labels(left_labels, num_classes);
 
-            leaves[left_leaf_idx]
-                = read_class_probabilities(num_classes, data.select_labels(&best_split.0));
-            leaves[right_leaf_idx]
-                = read_class_probabilities(num_classes, data.select_labels(&best_split.1));
+            let right_leaf_idx = right - num_nodes;
+            let right_labels = data.select_labels(&best_split.1);
+            leaves[right_leaf_idx] = Distribution::from_labels(right_labels, num_classes);
         }
         else {
             nodes[i] = best_candidate;
@@ -208,26 +226,6 @@ fn train_tree<C, G>(depth: usize,
         depth: depth as usize,
         nodes: nodes,
         leaves: leaves
-    }
-}
-
-fn read_class_probabilities<'a, I>(num_classes: usize, labels: I) -> Distribution
-    where I: ExactSizeIterator<Item=&'a usize>
-{
-    let mut probs = vec![0f64; num_classes];
-    let count = labels.len() as f64;
-    // There's no early stopping rule, so there might not be any entries
-    if count == 0f64 {
-        return Distribution { probs: probs };
-    }
-    for l in labels {
-        probs[*l] += 1.0
-    }
-    for n in 0..num_classes {
-        probs[n] /= count;
-    }
-    Distribution {
-        probs: probs
     }
 }
 
