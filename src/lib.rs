@@ -32,55 +32,12 @@
 extern crate test;
 extern crate rand;
 
+pub mod dataset;
 pub mod stump;
 pub mod hyperplane;
 
 use std::f64;
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Dataset {
-    pub labels: Vec<usize>,
-    pub data: Vec<Vec<f64>>
-}
-
-/// A set of indices into another array
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Selection(Vec<usize>);
-
-pub struct LabelIter<'a> {
-    labels: &'a [usize],
-    selection: &'a Selection,
-    pos: usize
-}
-
-impl<'a> LabelIter<'a> {
-    fn new(backing_labels: &'a [usize], selection: &'a Selection) -> LabelIter<'a> {
-        LabelIter {
-            labels: backing_labels,
-            selection: selection,
-            pos: 0
-        }
-    }
-}
-
-impl<'a> Iterator for LabelIter<'a> {
-    type Item = &'a usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.selection.0.len() {
-            return None;
-        }
-        let ref ret = self.labels[self.selection.0[self.pos]];
-        self.pos += 1;
-        Some(ret)
-    }
-}
-
-impl<'a> ExactSizeIterator for LabelIter<'a> {
-    fn len(&self) -> usize {
-        self.selection.0.len()
-    }
-}
+use dataset::{Dataset, Selection, LabelIter};
 
 pub trait Classifier {
     fn classify(&self, sample: &Vec<f64>) -> bool;
@@ -327,7 +284,8 @@ fn entropy<'a, I>(labels: I, num_classes: usize) -> f64
 
 #[cfg(test)]
 mod tests {
-    use super::{Dataset, entropy, Selection, train_tree, weighted_entropy_drop};
+    use super::{entropy, train_tree, weighted_entropy_drop};
+    use dataset::{Dataset, Selection};
     use super::stump::StumpGenerator;
     use test;
     use rand::{Rng, thread_rng};
