@@ -37,15 +37,19 @@ pub mod hyperplane;
 use std::f64;
 use dataset::{Dataset, DatasetView, Selection};
 
+/// A weak classifier, stored in the internal nodes of a Tree.
 pub trait Classifier {
     fn classify(&self, sample: &Vec<f64>) -> bool;
 }
 
+/// Generates candidate classifiers to use during training.
 pub trait Generator {
     type Classifier;
     fn generate(&mut self, count: usize) -> Vec<Self::Classifier>;
 }
 
+/// A leaf node of a Tree, for example a probability distribution over
+/// class labels reaching this code in training.
 pub trait Leaf {
     fn from_dataset(dataset: &DatasetView) -> Self;
     fn empty(num_classes: usize) -> Self;
@@ -55,6 +59,7 @@ pub trait Leaf {
     fn combine(leaves: &[Self], num_classes: usize) -> Self where Self: Sized;
 }
 
+/// Determines the goodness of a split.
 pub trait SplitCriterion {
     fn score(num_classes: usize, data: &Dataset,
              parent: &Selection, left: &Selection, right: &Selection) -> f64;
@@ -138,17 +143,17 @@ impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
         where G: Generator<Classifier=C>,
               S: SplitCriterion
      {
-        let num_nodes = 2usize.pow(depth as u32) - 1;
-        let num_leaves = num_nodes + 1;
+        let num_classifier_nodes = 2usize.pow(depth as u32) - 1;
+        let num_leaves = num_classifier_nodes + 1;
 
-        let mut nodes = vec![C::default(); num_nodes];
-        let mut nodes_data = vec![Selection(vec![]); num_nodes];
+        let mut nodes = vec![C::default(); num_classifier_nodes];
+        let mut nodes_data = vec![Selection(vec![]); num_classifier_nodes];
         let mut leaves = vec![L::empty(data.num_classes); num_leaves];
 
         nodes_data[0] = Selection((0..data.labels.len()).collect());
 
         // Invariant: nodes_data[i] has already been populated, but nodes[i] has not.
-        for i in 0..num_nodes {
+        for i in 0..num_classifier_nodes {
             let candidates = generator.generate(num_candidates);
 
             let mut best_gain = f64::NEG_INFINITY;
@@ -157,7 +162,6 @@ impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
 
             for c in candidates {
                 let (left, right) = Self::split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
-
                 let gain = S::score(data.num_classes, data, &nodes_data[i], &left, &right);
 
                 if gain > best_gain {
@@ -170,11 +174,11 @@ impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
             let left = Self::left_child_idx(i);
             let right = Self::right_child_idx(i);
 
-            if left >= num_nodes {
-                let left_leaf_idx = left - num_nodes;
+            if left >= num_classifier_nodes {
+                let left_leaf_idx = left - num_classifier_nodes;
                 leaves[left_leaf_idx] = L::from_dataset(&data.select(&best_split.0));
 
-                let right_leaf_idx = right - num_nodes;
+                let right_leaf_idx = right - num_classifier_nodes;
                 leaves[right_leaf_idx] = L::from_dataset(&data.select(&best_split.1));
             }
             else {
