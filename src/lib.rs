@@ -2,7 +2,6 @@
 // TODO:
 // * lots more testing
 // * more benchmarks, showing scaling with various dimensions
-// * support other leaf types
 // * support incomplete trees
 // * more stopping rules, e.g. min split size, min information gain
 // * support other information gains (e.g. for Hough forests)
@@ -30,11 +29,12 @@ extern crate test;
 extern crate rand;
 
 pub mod dataset;
+pub mod distribution;
 pub mod stump;
 pub mod hyperplane;
 
 use std::f64;
-use dataset::{Dataset, Selection};
+use dataset::{Dataset, DatasetView, Selection};
 
 pub trait Classifier {
     fn classify(&self, sample: &Vec<f64>) -> bool;
@@ -45,75 +45,17 @@ pub trait Generator {
     fn generate(&mut self, count: usize) -> Vec<Self::Classifier>;
 }
 
-#[derive(Debug, Clone)]
-pub struct Distribution {
-    pub probs: Vec<f64>
+pub trait Leaf {
+    fn from_dataset(dataset: &DatasetView) -> Self;
+    fn empty(num_classes: usize) -> Self;
+    // This probably shouldn't be on Leaf, shouldn't require
+    // an extra num_classes argument, and needn't
+    // return Self in general, but it'll do for now.
+    fn combine(leaves: &[Self], num_classes: usize) -> Self where Self: Sized;
 }
 
-impl Distribution {
-    pub fn from_labels<'a, I>(labels: I, num_classes: usize) -> Distribution
-        where I: ExactSizeIterator<Item=&'a usize>
-    {
-        let mut probs = vec![0f64; num_classes];
-        let count = labels.len() as f64;
-        if count == 0f64 {
-            return Distribution { probs: probs };
-        }
-        for l in labels {
-            probs[*l] += 1.0
-        }
-        for n in 0..num_classes {
-            probs[n] /= count;
-        }
-        Distribution {
-            probs: probs
-        }
-    }
-}
-
-impl Default for Distribution {
-    fn default() -> Distribution {
-        Distribution {
-            probs: vec![]
-        }
-    }
-}
-
-pub struct Tree<C> {
-    depth: usize,
-    nodes: Vec<C>,
-    leaves: Vec<Distribution>
-}
-
-impl<C: Classifier> Tree<C> {
-    fn num_nodes(&self) -> usize {
-        2usize.pow(self.depth as u32) - 1
-    }
-
-    pub fn classify(&self, sample: &Vec<f64>) -> Distribution {
-        let mut idx = 0;
-
-        loop {
-            let decision = self.nodes[idx].classify(sample);
-            idx = if decision { right_child_idx(idx) } else { left_child_idx(idx) };
-            let num_nodes = self.num_nodes();
-            if idx >= num_nodes {
-                return self.leaves[idx - num_nodes].clone();
-            }
-        }
-    }
-}
-
-pub fn left_child_idx(idx: usize) -> usize {
-    2 * idx + 1
-}
-
-pub fn right_child_idx(idx: usize) -> usize {
-    2 * idx + 2
-}
-
-pub struct Forest<C> {
-    trees: Vec<Tree<C>>,
+pub struct Forest<C, L> {
+    trees: Vec<Tree<C, L>>,
     num_classes: usize
 }
 
@@ -124,14 +66,23 @@ pub struct ForestParameters {
     pub num_candidates: usize
 }
 
-impl<C: Classifier + Default + Clone> Forest<C> {
-    pub fn train<G>(params: ForestParameters, generator: &mut G, data: &Dataset) -> Forest<C>
+pub struct Tree<C, L> {
+    // Length of longest path from root node to a leaf.
+    depth: usize,
+    // Implicit binary tree of classifier nodes.
+    nodes: Vec<C>,
+    // Leaf nodes.
+    leaves: Vec<L>
+}
+
+impl<C: Classifier + Default + Clone, L: Leaf + Clone> Forest<C, L> {
+    pub fn train<G>(params: ForestParameters, generator: &mut G, data: &Dataset) -> Forest<C, L>
         where G: Generator<Classifier=C>
     {
         let trees = (0..params.num_trees)
             .map(|t| {
                 println!("training tree {:?}", t);
-                train_tree(params.depth, params.num_candidates, generator, data)
+                Tree::<C, L>::train(params.depth, params.num_candidates, generator, data)
             })
             .collect();
 
@@ -141,105 +92,119 @@ impl<C: Classifier + Default + Clone> Forest<C> {
         }
     }
 
-    pub fn classify(&self, sample: &Vec<f64>) -> Distribution {
-        let mut probs = vec![0f64; self.num_classes];
+    pub fn classify(&self, sample: &Vec<f64>) -> L {
+        let mut leaves = Vec::with_capacity(self.trees.len());
 
         for tree in self.trees.iter() {
             let dist = tree.classify(sample);
-            for i in 0..self.num_classes {
-                probs[i] += dist.probs[i];
-            }
+            leaves.push(dist);
         }
 
-        for i in 0..self.num_classes {
-            probs[i] /= self.trees.len() as f64;
-        }
-
-        Distribution {
-            probs: probs
-        }
+        L::combine(&leaves, self.num_classes)
     }
 }
 
-fn train_tree<C, G>(depth: usize,
-                    num_candidates: usize,
-                    generator: &mut G,
-                    data: &Dataset) -> Tree<C>
-    where C: Classifier + Default + Clone,
-          G: Generator<Classifier=C>
- {
-    let num_nodes = 2usize.pow(depth as u32) - 1;
-    let num_leaves = num_nodes + 1;
+impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
+    fn num_nodes(&self) -> usize {
+        2usize.pow(self.depth as u32) - 1
+    }
 
-    let mut nodes = vec![C::default(); num_nodes];
-    let mut nodes_data = vec![Selection(vec![]); num_nodes];
-    let mut leaves = vec![Distribution { probs: vec![0f64; data.num_classes] }; num_leaves];
+    pub fn classify(&self, sample: &Vec<f64>) -> L {
+        let mut idx = 0;
 
-    nodes_data[0] = Selection((0..data.labels.len()).collect());
+        loop {
+            let decision = self.nodes[idx].classify(sample);
+            idx = if decision { Self::right_child_idx(idx) } else { Self::left_child_idx(idx) };
+            let num_nodes = self.num_nodes();
+            if idx >= num_nodes {
+                return self.leaves[idx - num_nodes].clone();
+            }
+        }
+    }
 
-    // Invariant: nodes_data[i] has already been populated, but nodes[i] has not.
-    for i in 0..num_nodes {
-        let candidates = generator.generate(num_candidates);
+    fn train<G>(depth: usize,
+                        num_candidates: usize,
+                        generator: &mut G,
+                        data: &Dataset) -> Tree<C, L>
+        where G: Generator<Classifier=C>
+     {
+        let num_nodes = 2usize.pow(depth as u32) - 1;
+        let num_leaves = num_nodes + 1;
 
-        let mut best_gain = f64::NEG_INFINITY;
-        let mut best_candidate = candidates[0].clone();
-        let mut best_split = (Selection(vec![]), Selection(vec![]));
+        let mut nodes = vec![C::default(); num_nodes];
+        let mut nodes_data = vec![Selection(vec![]); num_nodes];
+        let mut leaves = vec![L::empty(data.num_classes); num_leaves];
 
-        for c in candidates {
-            let (left, right) = split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
+        nodes_data[0] = Selection((0..data.labels.len()).collect());
 
-            let gain = weighted_entropy_drop(data.num_classes,
-                                             data,
-                                             &nodes_data[i],
-                                             &left,
-                                             &right);
+        // Invariant: nodes_data[i] has already been populated, but nodes[i] has not.
+        for i in 0..num_nodes {
+            let candidates = generator.generate(num_candidates);
 
-            if gain > best_gain {
-                best_gain = gain;
-                best_candidate = c;
-                best_split = (left, right);
+            let mut best_gain = f64::NEG_INFINITY;
+            let mut best_candidate = candidates[0].clone();
+            let mut best_split = (Selection(vec![]), Selection(vec![]));
+
+            for c in candidates {
+                let (left, right) = Self::split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
+
+                let gain = weighted_entropy_drop(data.num_classes,
+                                                 data,
+                                                 &nodes_data[i],
+                                                 &left,
+                                                 &right);
+
+                if gain > best_gain {
+                    best_gain = gain;
+                    best_candidate = c;
+                    best_split = (left, right);
+                }
+            }
+
+            let left = Self::left_child_idx(i);
+            let right = Self::right_child_idx(i);
+
+            if left >= num_nodes {
+                let left_leaf_idx = left - num_nodes;
+                leaves[left_leaf_idx] = L::from_dataset(&data.select(&best_split.0));
+
+                let right_leaf_idx = right - num_nodes;
+                leaves[right_leaf_idx] = L::from_dataset(&data.select(&best_split.1));
+            }
+            else {
+                nodes[i] = best_candidate;
+                nodes_data[left] = best_split.0;
+                nodes_data[right] = best_split.1;
             }
         }
 
-        let left = left_child_idx(i);
-        let right = right_child_idx(i);
-
-        if left >= num_nodes {
-            let left_leaf_idx = left - num_nodes;
-            let left_labels = data.select_labels(&best_split.0);
-            leaves[left_leaf_idx] = Distribution::from_labels(left_labels, data.num_classes);
-
-            let right_leaf_idx = right - num_nodes;
-            let right_labels = data.select_labels(&best_split.1);
-            leaves[right_leaf_idx] = Distribution::from_labels(right_labels, data.num_classes);
-        }
-        else {
-            nodes[i] = best_candidate;
-            nodes_data[left] = best_split.0;
-            nodes_data[right] = best_split.1;
+        Tree {
+            depth: depth as usize,
+            nodes: nodes,
+            leaves: leaves
         }
     }
 
-    Tree {
-        depth: depth as usize,
-        nodes: nodes,
-        leaves: leaves
-    }
-}
+    fn split(classifier: &C, data: &Dataset, selection: &Selection) -> (Selection, Selection) {
+        let mut left_indices = Vec::new();
+        let mut right_indices = Vec::new();
 
-fn split<C: Classifier>(classifier: &C,
-                        data: &Dataset,
-                        selection: &Selection) -> (Selection, Selection) {
-    let mut left_indices = Vec::new();
-    let mut right_indices = Vec::new();
+        for &i in &selection.0 {
+            let ref d = data.data[i];
+            let set = if classifier.classify(&d) { &mut right_indices } else { &mut left_indices };
+            set.push(i);
+        }
 
-    for &i in &selection.0 {
-        let ref d = data.data[i];
-        let set = if classifier.classify(&d) { &mut right_indices } else { &mut left_indices };
-        set.push(i);
+        (Selection(left_indices), Selection(right_indices))
     }
 
-    (Selection(left_indices), Selection(right_indices))
+    fn left_child_idx(idx: usize) -> usize {
+        2 * idx + 1
+    }
+
+    fn right_child_idx(idx: usize) -> usize {
+        2 * idx + 2
+    }
 }
 
 fn weighted_entropy_drop(num_classes: usize,
@@ -280,9 +245,10 @@ fn entropy<'a, I>(labels: I, num_classes: usize) -> f64
 
 #[cfg(test)]
 mod tests {
-    use super::{entropy, train_tree, weighted_entropy_drop};
+    use super::{entropy, Tree, weighted_entropy_drop};
     use dataset::{Dataset, Selection};
-    use super::stump::StumpGenerator;
+    use stump::{Stump, StumpGenerator};
+    use distribution::Distribution;
     use test;
     use rand::{Rng, thread_rng};
 
@@ -351,7 +317,7 @@ mod tests {
         };
 
         b.iter(|| {
-            train_tree(depth, num_candidates, &mut generator, &dataset)
+            Tree::<Stump, Distribution>::train(depth, num_candidates, &mut generator, &dataset)
         });
    }
 }
