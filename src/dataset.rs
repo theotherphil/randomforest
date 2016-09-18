@@ -28,6 +28,14 @@ impl Dataset {
             selection: selection
         }
     }
+
+    pub fn select_labels<'a>(&'a self, selection: &'a Selection) -> SelectionIter<usize> {
+        SelectionIter::new(&self.labels, selection)
+    }
+
+    pub fn select_data<'a>(&'a self, selection: &'a Selection) -> SelectionIter<Vec<f64>> {
+        SelectionIter::new(&self.data, selection)
+    }
 }
 
 impl<'a> DatasetView<'a> {
@@ -51,7 +59,7 @@ pub struct SelectionIter<'a, T: 'a> {
 }
 
 impl<'a, T> SelectionIter<'a, T> {
-    pub fn new(values: &'a [T], selection: &'a Selection) -> SelectionIter<'a, T> {
+    fn new(values: &'a [T], selection: &'a Selection) -> SelectionIter<'a, T> {
         SelectionIter {
             values: values,
             selection: selection,

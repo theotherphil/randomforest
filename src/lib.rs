@@ -37,7 +37,7 @@ pub mod stump;
 pub mod hyperplane;
 
 use std::f64;
-use dataset::{Dataset, Selection, SelectionIter};
+use dataset::{Dataset, Selection};
 
 pub trait Classifier {
     fn classify(&self, sample: &Vec<f64>) -> bool;
@@ -193,9 +193,9 @@ fn train_tree<C, G>(depth: usize,
             let right_leaf_idx = right - num_nodes;
 
             leaves[left_leaf_idx]
-                = read_class_probabilities(num_classes, LabelIter::new(&data.labels, &best_split.0));
+                = read_class_probabilities(num_classes, data.select_labels(&best_split.0));
             leaves[right_leaf_idx]
-                = read_class_probabilities(num_classes, LabelIter::new(&data.labels, &best_split.1));
+                = read_class_probabilities(num_classes, data.select_labels(&best_split.1));
         }
         else {
             nodes[i] = best_candidate;
@@ -254,9 +254,9 @@ fn weighted_entropy_drop(num_classes: usize,
     let left_weight = left.0.len() as f64 / parent.0.len() as f64;
     let right_weight = right.0.len() as f64 / parent.0.len() as f64;
 
-    let weighted_left = entropy(LabelIter::new(&data.labels, left), num_classes) * left_weight;
-    let weighted_right = entropy(LabelIter::new(&data.labels, right), num_classes) * right_weight;
-    entropy(LabelIter::new(&data.labels, parent), num_classes) - weighted_left - weighted_right
+    let weighted_left = entropy(data.select_labels(left), num_classes) * left_weight;
+    let weighted_right = entropy(data.select_labels(right), num_classes) * right_weight;
+    entropy(data.select_labels(parent), num_classes) - weighted_left - weighted_right
 }
 
 // Could allow non-usize labels. but then we'd need a map from label to index
