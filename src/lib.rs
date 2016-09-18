@@ -72,15 +72,6 @@ pub struct ForestParameters {
     pub num_candidates: usize
 }
 
-pub struct Tree<C, L> {
-    // Length of longest path from root node to a leaf.
-    depth: usize,
-    // Implicit binary tree of classifier nodes.
-    nodes: Vec<C>,
-    // Leaf nodes.
-    leaves: Vec<L>
-}
-
 impl<C: Classifier + Default + Clone, L: Leaf + Clone> Forest<C, L> {
     pub fn train<G, S>(params: ForestParameters,
                        generator: &mut G,
@@ -113,12 +104,21 @@ impl<C: Classifier + Default + Clone, L: Leaf + Clone> Forest<C, L> {
     }
 }
 
+struct Tree<C, L> {
+    // Length of longest path from root node to a leaf.
+    depth: usize,
+    // Implicit binary tree of classifier nodes.
+    nodes: Vec<C>,
+    // Leaf nodes.
+    leaves: Vec<L>
+}
+
 impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
     fn num_nodes(&self) -> usize {
         2usize.pow(self.depth as u32) - 1
     }
 
-    pub fn classify(&self, sample: &Vec<f64>) -> L {
+    fn classify(&self, sample: &Vec<f64>) -> L {
         let mut idx = 0;
 
         loop {
@@ -158,8 +158,7 @@ impl<C: Classifier + Default + Clone, L: Leaf + Clone> Tree<C, L> {
             for c in candidates {
                 let (left, right) = Self::split(&c, data, &nodes_data[i].clone()); // TODO: don't clone
 
-                let gain = S::score(data.num_classes, data,
-                                    &nodes_data[i], &left, &right);
+                let gain = S::score(data.num_classes, data, &nodes_data[i], &left, &right);
 
                 if gain > best_gain {
                     best_gain = gain;
